@@ -21,7 +21,7 @@ spec:
       cors:
         allowOrigins:
         - "https://bookinfo.example.com"
-        - "https://dashboard.*"
+        - "https://*.sub.example.com:8080"
         allowMethods:
         - GET
         - POST

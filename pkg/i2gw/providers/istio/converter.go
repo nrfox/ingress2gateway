@@ -45,6 +45,10 @@ const (
 	virtualServiceKey contextKey = iota
 )
 
+// This regex comes from the GW API CORSOrigin type.
+// Convert this CEL pattern to a regex: (^\*$)|(^(http(s)?):\/\/(((\*\.)?([a-zA-Z0-9\-]+\.)*[a-zA-Z0-9-]+|\*)(:([0-9]{1,5}))?)$)
+var corsOriginRegexp = regexp.MustCompile(`(^\*$)|(^(http(s)?):\/\/(((\*\.)?([a-zA-Z0-9\-]+\.)*[a-zA-Z0-9-]+|\*)(:([0-9]{1,5}))?)$)`)
+
 type resourcesToIRConverter struct {
 	// gw -> namespace -> hosts; stores hosts allowed by each Gateway
 	gwAllowedHosts map[types.NamespacedName]map[string]sets.Set[string]
@@ -605,13 +609,28 @@ func (c *resourcesToIRConverter) convertVsHTTPRoutes(virtualService metav1.Objec
 				case *istiov1beta1.StringMatch_Exact:
 					corsFilter.AllowOrigins = append(corsFilter.AllowOrigins, gatewayv1.CORSOrigin(m.Exact))
 				case *istiov1beta1.StringMatch_Prefix:
-					corsFilter.AllowOrigins = append(corsFilter.AllowOrigins, gatewayv1.CORSOrigin(m.Prefix+"*"))
+					// In GW API CORSOrigin strings allow wildcards but they are a greedy match to the left.
+					// There's no way to express a prefix that should match to the right.
+					c.notify(notifications.InfoNotification, fmt.Sprintf("ignoring field: %v", httpRouteFieldPath.Child("CorsPolicy", "AllowOrigins", "Prefix").Key(origin.String())), vs)
+					klog.Infof("ignoring field: %v", httpRouteFieldPath.Child("CorsPolicy", "AllowOrigins", "Prefix").Key(origin.String()))
 				case *istiov1beta1.StringMatch_Regex:
-					c.notify(notifications.InfoNotification, fmt.Sprintf("ignoring regex AllowOrigin, only stricter pattern matching is allowed for CORSOrigin: %v", httpRouteFieldPath.Child("CorsPolicy").Child("AllowOrigins")), vs)
-					klog.Infof("ignoring regex AllowOrigin, only stricter pattern matching is allowed for CORSOrigin: %v", httpRouteFieldPath.Child("CorsPolicy").Child("AllowOrigins"))
+					// Single wildcards are allowed.
+					if m.Regex == "*" {
+						corsFilter.AllowOrigins = append(corsFilter.AllowOrigins, gatewayv1.CORSOrigin("*"))
+						continue
+					}
+
+					// Try to see if the regex matches the corsOriginRegexp.
+					if corsOriginRegexp.MatchString(m.Regex) {
+						corsFilter.AllowOrigins = append(corsFilter.AllowOrigins, gatewayv1.CORSOrigin(m.Regex))
+						continue
+					}
+
+					c.notify(notifications.InfoNotification, fmt.Sprintf("ignoring field: %v", httpRouteFieldPath.Child("CorsPolicy", "AllowOrigins", "Regex").Key(origin.String())), vs)
+					klog.Infof("ignoring field: %v", httpRouteFieldPath.Child("CorsPolicy", "AllowOrigins", "Regex").Key(origin.String()))
 				default:
-					c.notify(notifications.WarningNotification, fmt.Sprintf("ignoring unsupported AllowOrigin match type in: %v", httpRouteFieldPath.Child("CorsPolicy").Child("AllowOrigins")), vs)
-					klog.Warningf("ignoring unsupported AllowOrigin match type in: %v", httpRouteFieldPath.Child("CorsPolicy").Child("AllowOrigins"))
+					c.notify(notifications.WarningNotification, fmt.Sprintf("ignoring unsupported AllowOrigin match type in: %v", httpRouteFieldPath.Child("CorsPolicy", "AllowOrigins").Key(origin.String())), vs)
+					klog.Warningf("ignoring unsupported AllowOrigin match type in: %v", httpRouteFieldPath.Child("CorsPolicy", "AllowOrigins").Key(origin.String()))
 				}
 			}
 

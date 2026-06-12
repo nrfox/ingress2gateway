@@ -13,8 +13,11 @@ spec:
       corsPolicy:
         allowOrigins:
           - exact: https://bookinfo.example.com
-          - prefix: https://dashboard.
-          # regex is ignored.
+          # prefix is ignored.
+          - prefix: /dashboard
+          # regex will match when it matches GW API validation
+          - regex: https://*.sub.example.com:8080
+          # regex won't match when it contains regexp metacharacters
           - regex: https://.*\.example\.com
         allowMethods:
           - GET
